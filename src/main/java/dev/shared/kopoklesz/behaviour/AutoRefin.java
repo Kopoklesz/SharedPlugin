@@ -14,14 +14,12 @@ import eu.darkbot.api.managers.StatsAPI;
 
 import java.util.Arrays;
 import java.util.Comparator;
-import eu.darkbot.util.Timer;
 
 import static eu.darkbot.api.managers.OreAPI.*;
 
 @Feature(name = "Auto refiner", description = "Automatically refine materials")
 public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
 
-    private final Main main;
     private final OreAPI ores;
     private final GuiManager guiManager;
     private final IDarkBotAPI darkbotApi;
@@ -29,12 +27,10 @@ public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
 
     private AutoRefinConfig config;
 
-    public AutoRefin(Main main,
-                      OreAPI ores,
+    public AutoRefin(OreAPI ores,
                       GuiManager guiManager,
                       IDarkBotAPI darkbotApi,
                       StatsAPI stats) {
-        this.main = main;
         this.ores = ores;
         this.guiManager = guiManager;
         this.darkbotApi = darkbotApi;
