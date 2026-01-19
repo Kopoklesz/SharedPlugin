@@ -6,8 +6,6 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 import dev.shared.do_gamer.config.OreSellerConfig;
 import dev.shared.do_gamer.config.OreSellerConfig.SellModeOptions;
@@ -19,6 +17,7 @@ import eu.darkbot.api.config.ConfigSetting;
 import eu.darkbot.api.extensions.Behavior;
 import eu.darkbot.api.extensions.Configurable;
 import eu.darkbot.api.extensions.Feature;
+import eu.darkbot.api.game.entities.Portal;
 import eu.darkbot.api.game.entities.Station;
 import eu.darkbot.api.game.enums.PetGear;
 import eu.darkbot.api.game.items.ItemFlag;
@@ -45,8 +44,6 @@ import eu.darkbot.util.Timer;
 
 @Feature(name = "Ore Seller", description = "Sells ores at base, via PET trader gear, or using the HM7 trade drone when cargo is full")
 public class OreSeller extends TemporalModule implements Behavior, Configurable<OreSellerConfig> {
-
-    private static final Logger logger = Logger.getLogger(OreSeller.class.getName());
 
     private final HeroAPI hero;
     private final MovementAPI movement;
@@ -77,6 +74,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     private static final int BASE_DOCKING_DISTANCE = 300;
     private static final int MIN_PALLADIUM_STACK = 15;
     private static final int SELL_INTERVAL_MS = 750;
+    private static final double NPC_DISTANCE_THRESHOLD = 3000.0;
     private static final double MIN_TRIGGER_PERCENT = 0.05;
     private static final double MAX_TRIGGER_PERCENT = 0.99;
     private static final long MIN_ACTIVATION_DELAY_MS = 250L;
@@ -149,6 +147,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     @Override
     public void onTickBehavior() {
         if (!this.isReadyForBehavior()) {
+            this.finish();
             return;
         }
 
@@ -188,17 +187,12 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
             return;
         }
 
-        if (!this.isReadyForBehavior()) {
-            this.finish(false);
-            return;
-        }
-
         Timer failSafe = this.timer(TimerSlot.FAIL_SAFE);
         if (failSafe.isArmed()) {
             if (this.isFailSafeExemptState()) {
                 // Recheck selling trigger in exempt states
                 if (!this.shouldTriggerSelling(true)) {
-                    this.finish(true);
+                    this.finish();
                     return; // Abort if auto-refine or auto upgrade weapons reduced the cargo fill
                 }
 
@@ -206,8 +200,8 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
                 long timeout = this.resolveFailSafeMillis(this.activeMode);
                 failSafe.activate(timeout);
             } else if (failSafe.isInactive()) {
-                logger.warning("Ore seller timed out");
-                this.finish(false);
+                System.out.println("Ore seller timed out");
+                this.finish();
                 return;
             }
         }
@@ -226,7 +220,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
                 this.handleSelling();
                 break;
             case CLOSE_TRADE:
-                this.handleCloseTrade();
+                this.finish();
                 break;
             case SAFE_POSITIONING:
                 this.handleSafePositioning();
@@ -238,7 +232,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
                 this.handleDronePreparing();
                 break;
             default:
-                this.finish(true);
+                this.finish();
                 break;
         }
     }
@@ -346,13 +340,18 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
             return false;
         }
 
-        // Keep inactive in GG maps when in base mode or any NPCs are present
-        if (this.isGGMap() && (SellModeOptions.BASE.equals(this.config.mode) || this.hasActiveNpc())) {
+        // Keep inactive in GG maps when in base mode or any NPCs are nearby
+        if (this.isGGMap() && (SellModeOptions.BASE.equals(this.config.mode) || this.hasNearbyNpc())) {
             return false;
         }
 
         // Keep inactive while attacking
         if (this.attacker.hasTarget() && this.attacker.isAttacking()) {
+            return false;
+        }
+
+        // Keep inactive if jumping through portal
+        if (this.entities.getPortals().stream().anyMatch(Portal::isJumping)) {
             return false;
         }
 
@@ -384,10 +383,14 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     }
 
     /**
-     * Checks if have any NPCs present on the current map (useful for GG maps).
+     * Checks for nearby NPCs within a defined threshold distance.
      */
-    private boolean hasActiveNpc() {
-        return this.entities != null && !this.entities.getNpcs().isEmpty();
+    private boolean hasNearbyNpc() {
+        if (this.entities == null || this.hero == null) {
+            return false; // Safety check
+        }
+
+        return this.entities.getNpcs().stream().anyMatch(npc -> this.hero.distanceTo(npc) <= NPC_DISTANCE_THRESHOLD);
     }
 
     /**
@@ -409,10 +412,10 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     }
 
     /**
-     * Confirms the PET trader gear is equipped and usable.
+     * Confirms the PET trader gear is equipped and ready for use.
      */
     private boolean canUsePetTrader() {
-        return this.pet.hasGear(PetGear.TRADER);
+        return this.pet.hasGear(PetGear.TRADER) && !this.pet.hasCooldown(PetGear.TRADER);
     }
 
     /**
@@ -461,7 +464,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
         }
 
         if (!prepared) {
-            this.abortStart();
+            this.finish();
             return;
         }
 
@@ -490,32 +493,12 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     }
 
     /**
-     * Resets transient state when a run cannot begin.
-     */
-    private void abortStart() {
-        this.timer(TimerSlot.FAIL_SAFE).disarm();
-        this.timer(TimerSlot.SELL_DELAY).disarm();
-        this.timer(TimerSlot.LOAD).disarm();
-        this.timer(TimerSlot.CLOSE_TRADE).disarm();
-        this.timer(TimerSlot.TRIGGER_STATE_CACHE).disarm();
-        this.cachedTriggerResult = null;
-        this.postSafetyState = null;
-        if (this.safetyFinderOnly != null) {
-            this.safetyFinderOnly.setRefreshing(false);
-        }
-        this.activeMode = ActiveMode.NONE;
-        this.state = State.IDLE;
-        this.sellPlan = Collections.emptyList();
-        this.targetRefinery = null;
-    }
-
-    /**
      * Determines travel needs and sets up the base selling state.
      */
     private boolean prepareBaseModeState() {
         this.desiredBaseMap = this.resolveDesiredBaseMap();
         if (this.desiredBaseMap == null) {
-            logger.warning("Unable to resolve target base map for ore selling");
+            System.out.println("Unable to resolve target base map for ore selling");
             return false;
         }
 
@@ -541,7 +524,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
             return true; // No need for safety finder in GG maps
         }
         if (this.safetyFinderOnly == null) {
-            logger.warning("Safety finder unavailable for ore selling");
+            System.out.println("Safety finder unavailable for ore selling");
             return false;
         }
         this.postSafetyState = nextState;
@@ -557,7 +540,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
         if (this.desiredBaseMap == null) {
             this.desiredBaseMap = this.resolveDesiredBaseMap();
             if (this.desiredBaseMap == null) {
-                this.finish(false);
+                this.finish();
                 return;
             }
             if (this.previousPetEnabled == null) {
@@ -585,8 +568,8 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     private void handleMoveToRefinery() {
         Station.Refinery refinery = this.resolveRefinery();
         if (refinery == null) {
-            logger.warning("No refinery found on current map for ore selling");
-            this.finish(false);
+            System.out.println("No refinery found on current map for ore selling");
+            this.finish();
             return;
         }
 
@@ -608,7 +591,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
      */
     private void handleSafePositioning() {
         if (this.safetyFinderOnly == null || this.postSafetyState == null) {
-            this.finish(false);
+            this.finish();
             return;
         }
 
@@ -685,7 +668,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     private void handleOpenTrade() {
         Station.Refinery refinery = this.resolveRefinery();
         if (refinery == null) {
-            this.finish(false);
+            this.finish();
             return;
         }
 
@@ -766,19 +749,9 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
         } else if (this.activeMode == ActiveMode.DRONE) {
             this.state = State.DRONE_PREPARING;
         } else {
-            this.finish(false);
+            this.finish();
         }
         this.timer(TimerSlot.CLOSE_TRADE).disarm();
-    }
-
-    /**
-     * Closes the trade window after finishing the sell plan.
-     */
-    private void handleCloseTrade() {
-        if (!this.oreApi.showTrade(false, null)) {
-            return;
-        }
-        this.finish(true);
     }
 
     /**
@@ -786,7 +759,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
      */
     private void handlePetPreparing() {
         if (!this.canUsePetTrader()) {
-            this.finish(false);
+            this.finish();
             return;
         }
 
@@ -817,12 +790,12 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
         }
 
         PetGear gear = this.pet.getGear();
-        if (gear == PetGear.TRADER) {
+        if (gear != PetGear.PASSIVE) {
             try {
-                this.pet.setGear(PetGear.PASSIVE); // Unequip trader gear
+                this.pet.setGear(PetGear.PASSIVE); // Unequip gear first
                 loadTimer.activate(delay);
             } catch (ItemNotEquippedException ignored) {
-                // Ignored exception, we just wanted to unequip trader gear
+                // Ignored exception, we just wanted to unequip gear
             }
             return;
         }
@@ -835,8 +808,8 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
             this.pet.setGear(PetGear.TRADER);
             loadTimer.activate(delay);
         } catch (ItemNotEquippedException e) {
-            logger.log(Level.WARNING, "Failed to equip PET trader gear for ore selling", e);
-            this.finish(false);
+            System.out.println("Failed to equip PET trader gear for ore selling");
+            this.finish();
         }
     }
 
@@ -845,7 +818,7 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
      */
     private void handleDronePreparing() {
         if (!this.canUseTradeDrone()) {
-            this.finish(false);
+            this.finish();
             return;
         }
 
@@ -1011,13 +984,15 @@ public class OreSeller extends TemporalModule implements Behavior, Configurable<
     }
 
     /**
-     * Cleans up transient state after finishing a selling run.
+     * Cleans up transient state and resets the module to idle.
      */
-    private void finish(boolean success) {
-        if (!success) {
-            logger.fine("Ore seller aborted before finishing run");
-        }
+    private void finish() {
         this.oreApi.showTrade(false, null);
+
+        if (this.activeMode == ActiveMode.NONE && this.state == State.IDLE) {
+            return; // Already finished
+        }
+
         if (this.previousPetEnabled != null || this.previousPetGear != null) {
             this.restorePetSettings();
         }
