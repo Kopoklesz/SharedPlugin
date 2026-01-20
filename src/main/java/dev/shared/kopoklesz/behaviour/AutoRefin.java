@@ -14,6 +14,8 @@ import eu.darkbot.api.managers.StatsAPI;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static eu.darkbot.api.managers.OreAPI.*;
 
@@ -26,6 +28,10 @@ public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
     private final StatsAPI stats;
 
     private AutoRefinConfig config;
+
+    // Track cargo to prevent unnecessary API calls when unable to refine
+    private int lastCargoAmount = -1;
+    private boolean lastRefineAttemptFailed = false;
 
     public AutoRefin(OreAPI ores,
                       GuiManager guiManager,
@@ -48,14 +54,40 @@ public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
     public void onTickBehavior() {
         if (!isReadyForRefining()) return; // check if we can refine
 
-        Arrays.stream(Ore.values())
-                .filter(this::shouldRefineOre)  // filter allowed ores
-                .max(Comparator.comparingInt((Ore o) -> maxRefine(o))) // get the ore with the highest possible refine amount
-                .ifPresent(ore -> {
-                    int maxRefine = maxRefine(ore);
-                    if (maxRefine <= 0) return;
-                    darkbotApi.refine(darkbotApi.readLong(guiManager.getAddress() + 0x78), ore, maxRefine); // refining
+        int currentCargo = stats.getCargo();
+
+        // If cargo hasn't changed since last failed refine attempt, skip to prevent unnecessary API calls
+        if (lastRefineAttemptFailed && currentCargo == lastCargoAmount) {
+            return;
+        }
+
+        // Cache maxRefine values to avoid duplicate calculations
+        Map<Ore, Integer> refineMap = Arrays.stream(Ore.values())
+                .filter(this::shouldRefineOre)
+                .collect(Collectors.toMap(
+                        ore -> ore,
+                        this::maxRefine
+                ));
+
+        // Find the ore with the highest refineable amount
+        refineMap.entrySet().stream()
+                .filter(e -> e.getValue() > 0)
+                .max(Map.Entry.comparingByValue())
+                .ifPresent(entry -> {
+                    darkbotApi.refine(
+                            darkbotApi.readLong(guiManager.getAddress() + 0x78),
+                            entry.getKey(),
+                            entry.getValue()
+                    );
+                    lastCargoAmount = currentCargo;
+                    lastRefineAttemptFailed = false;
                 });
+
+        // If no ore could be refined, mark as failed and store cargo amount
+        if (refineMap.values().stream().noneMatch(v -> v > 0)) {
+            lastRefineAttemptFailed = true;
+            lastCargoAmount = currentCargo;
+        }
     }
 
     /////////////////////////////////////////////////// helper methods ///////////////////////////////////////////////////
