@@ -1,14 +1,8 @@
 package dev.shared.kopoklesz.behaviour;
 
-import static eu.darkbot.api.managers.OreAPI.*;
-
-import java.security.DrbgParameters.Capability;
-import java.util.Arrays;
-import java.util.Map;
-import java.util.stream.Collectors;
-
 import com.github.manolo8.darkbot.Main;
 import com.github.manolo8.darkbot.core.IDarkBotAPI;
+import com.github.manolo8.darkbot.core.api.Capability;
 import com.github.manolo8.darkbot.core.manager.GuiManager;
 
 import dev.shared.kopoklesz.config.AutoRefinConfig;
@@ -18,6 +12,13 @@ import eu.darkbot.api.extensions.Configurable;
 import eu.darkbot.api.extensions.Feature;
 import eu.darkbot.api.managers.OreAPI;
 import eu.darkbot.api.managers.StatsAPI;
+
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import static eu.darkbot.api.managers.OreAPI.*;
 
 @Feature(name = "Auto refiner", description = "Automatically refine materials")
 public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
@@ -55,8 +56,7 @@ public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
     // behavior
     @Override
     public void onTickBehavior() {
-        if (!isReadyForRefining())
-            return; // check if we can refine
+        if (!isReadyForRefining()) return; // check if we can refine
 
         int currentCargo = stats.getCargo();
 
@@ -76,9 +76,6 @@ public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
         lastRefineAttemptFailed = true; // assume refine attempt will fail
         lastCargoAmount = currentCargo; // update last cargo amount
 
-        lastRefineAttemptFailed = true; // assume refine attempt will fail
-        lastCargoAmount = currentCargo; // update last cargo amount
-
         // Find the ore with the highest refineable amount
         refineMap.entrySet().stream()
                 .filter(e -> e.getValue() > 0)
@@ -94,16 +91,13 @@ public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
 
     /////////////////////////////////////////////////// helper methods
     private boolean isReadyForRefining() {
-        if (config == null || !config.enabled)
-            return false;
+        if (config == null || !config.enabled) return false;
 
         if (main.config.MISCELLANEOUS.AUTO_REFINE || !darkbotApi.hasCapability(Capability.DIRECT_REFINE)) return false;
 
-        if (guiManager.getAddress() == 0)
-            return false;
+        if (guiManager.getAddress() == 0) return false;
 
-        if (getCargoPercent() <= config.triggerPercent)
-            return false;
+        if (getCargoPercent() <= config.triggerPercent) return false;
 
         return true;
     }
