@@ -89,7 +89,7 @@ public class AutoRefin implements Behavior, Configurable<AutoRefinConfig> {
                 });
     }
 
-    /////////////////////////////////////////////////// helper methods
+    /////////////////////////////////////////////////// helper methods ///////////////////////////////////////////////////
     private boolean isReadyForRefining() {
         if (config == null || !config.enabled) return false;
 
