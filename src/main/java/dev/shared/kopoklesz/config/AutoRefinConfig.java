@@ -13,7 +13,7 @@ public class AutoRefinConfig {
     public double triggerPercent = 0.75;
 
     @Option("kopoklesz.auto_refin.xenomit_reserve") // xenomit reserve
-    @Number(min = 0)
+    @Number(min = 0, max = 10_000_000, step = 1000)
     public int xenomitReserve = 0;
 
     @Option("kopoklesz.auto_refin.ores") // allowed ores
