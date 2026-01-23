@@ -1,4 +1,4 @@
-name: release
+name: Jar build & sign
 
 permissions:
   contents: write
@@ -11,6 +11,11 @@ on:
   release:
     types:
       - published
+  workflow_run:
+    workflows:
+      - Release on version change
+    types:
+      - completed
 
 jobs:
   build-sign-upload:
