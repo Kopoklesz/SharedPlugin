@@ -15,35 +15,15 @@ import eu.darkbot.api.managers.BackpageAPI;
 import eu.darkbot.api.managers.BotAPI;
 import eu.darkbot.api.managers.StatsAPI;
 
-/**
- * Automatikus árverési rendszer plugin
- *
- * Működés:
- * 1. Rendszeresen lekéri az aktív árveréseket a szerverről
- * 2. Parseolja az árverési adatokat
- * 3. Ellenőrzi hogy van-e érdekes tétel (config alapján)
- * 4. Automatikusan licitál ha minden feltétel teljesül
- *
- * Alapul a DarkBot hivatalos AuctionManager implementációja lett használva.
- */
 @Feature(name = "Auto Auction", description = "Automatically monitors and bids on auctions")
 public class AutoAuction implements Behavior, Configurable<AutoAuctionConfig> {
 
-    // ============================================
-    // API-k ésManagerek
-    // ============================================
     private final BackpageAPI backpage;
     private final StatsAPI stats;
     private final BotAPI bot;
 
-    // ============================================
-    // Konfiguráció
-    // ============================================
     private AutoAuctionConfig config;
 
-    // ============================================
-    // Állapot követés
-    // ============================================
     private long lastUpdate = 0;
     private final Map<String, AuctionItem> trackedAuctions = new LinkedHashMap<>();
 
@@ -163,8 +143,6 @@ public class AutoAuction implements Behavior, Configurable<AutoAuctionConfig> {
         if (config.targetItems == null || config.targetItems.trim().isEmpty()) {
             return false;
         }
-
-        // TODO: További ellenőrzések (pl. captcha detektálás)
 
         return true;
     }
